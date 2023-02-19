@@ -1,7 +1,7 @@
 # Carelink Python Client
 *Experimental Medtronic CareLink Client in Python*
 
-Fork of the original put you can plot your data in the terminal! This just adds some simple plotting functionality so you can keep the plot open in the terminal and glance there for your BG info instead of you pump. Looks like this:
+Fork of the original but you can plot your data in the terminal! This just adds some simple plotting functionality so you can keep the plot open in the terminal and glance there for your BG info instead of you pump. Looks like this:
 
 <p align="center">
   <img src="./doc/terminal.png" alt="Terminal Example" height="400"/>
