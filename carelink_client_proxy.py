@@ -9,8 +9,8 @@
 #    REST API to local clients:
 #
 #    Send a GET request to the following URI: 
-#      http://<serveraddr>:8081/carelink/          # all Carelink data
-#      http://<serveraddr>:8081/carelink/nohistory # no history data
+#      http://<serveraddr>:8080/carelink/alldata   # all Carelink data
+#      http://<serveraddr>:8080/carelink/nohistory # no history data
 #  
 #  Author:
 #
@@ -20,10 +20,8 @@
 #
 #    08/06/2021 - Initial public release
 #    27/07/2021 - Add logging, bug fixes
-#    06/02/2022 - Download new data as soon as it is available
-#    08/02/2022 - Fix HTTP API
 #
-#  Copyright 2021-2022, Ondrej Wisniewski 
+#  Copyright 2021, Ondrej Wisniewski 
 #
 ###############################################################################
 
@@ -36,11 +34,11 @@ import signal
 import threading 
 import syslog
 import logging as log
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from http import HTTPStatus
 
 
-VERSION = "0.5"
+VERSION = "0.2"
 
 # Logging config
 FORMAT = '[%(asctime)s:%(levelname)s] %(message)s'
@@ -49,11 +47,7 @@ log.basicConfig(format=FORMAT, datefmt='%Y-%m-%d %H:%M:%S', level=log.DEBUG)
 # HTTP server settings
 HOSTNAME = "0.0.0.0"
 PORT     = 8081
-BASEURI  = "carelink"
-OPT_NOHISTORY = "nohistory"
-
-UPDATE_INTERVAL = 300
-RETRY_INTERVAL  = 120
+BASEURI  = "carelink/"
 
 recentData = None
 verbose = False
@@ -70,25 +64,24 @@ def on_sigterm(signum, frame):
 
 
 def get_essential_data(data):
-   mydata = ""
-   if data != None:      
-      mydata = data.copy()
-      try:
-         del mydata["sgs"]
-      except (KeyError,TypeError) as e:
-         pass
-      try:
-         del mydata["markers"]
-      except (KeyError,TypeError) as e:
-         pass
-      try:
-         del mydata["limits"]
-      except (KeyError,TypeError) as e:
-         pass
-      try:
-         del mydata["notificationHistory"]
-      except (KeyError,TypeError) as e:
-         pass
+   mydata = data
+   try:
+      del mydata["sgs"]
+   except (KeyError,TypeError) as e:
+      pass
+   try:
+      del mydata["markers"]
+   except (KeyError,TypeError) as e:
+      pass
+   try:
+      del mydata["limits"]
+   except (KeyError,TypeError) as e:
+      pass
+   try:
+      del mydata["notificationHistory"]
+   except (KeyError,TypeError) as e:
+      pass
+   
    return mydata
 
 
@@ -98,7 +91,7 @@ def get_essential_data(data):
 class MyServer(BaseHTTPRequestHandler):
    
    def log_message(self, format, *args):
-      #Disable logging
+      # Disable logging
       pass
 
    def do_GET(self):
@@ -107,16 +100,14 @@ class MyServer(BaseHTTPRequestHandler):
       log.debug("received client request from %s" % (self.address_string()))
       
       # Check request path
-      if self.path.strip("/") == BASEURI:
+      if self.path.strip("/") == BASEURI+"alldata":
          # Get latest Carelink data (complete)
          response = json.dumps(recentData)
          status_code = HTTPStatus.OK
-         #print("All data requested")
-      elif self.path.strip("/") == BASEURI+'/'+OPT_NOHISTORY:
+      elif self.path.strip("/") == BASEURI+"nohistory":
          # Get latest Carelink data without history
          response = json.dumps(get_essential_data(recentData))
          status_code = HTTPStatus.OK
-         #print("Only essential data requested")
       else:
          response = ""
          status_code = HTTPStatus.NOT_FOUND
@@ -137,7 +128,7 @@ class MyServer(BaseHTTPRequestHandler):
 #################################################
 def webserver_thread():
    # Init web server
-   webserver = ThreadingHTTPServer((HOSTNAME, PORT), MyServer)
+   webserver = HTTPServer((HOSTNAME, PORT), MyServer)
    log.debug("HTTP server started at http://%s:%s" % (HOSTNAME, PORT))
    #syslog.syslog(syslog.LOG_NOTICE, "HTTP server started at http://"+HOSTNAME+":"+str(PORT))
 
@@ -159,7 +150,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--username', '-u', type=str, help='CareLink username', required=True)
 parser.add_argument('--password', '-p', type=str, help='CareLink password', required=True)
 parser.add_argument('--country',  '-c', type=str, help='CareLink two letter country code', required=True)
-parser.add_argument('--wait',     '-w', type=int, help='Wait seconds between repeated calls (default 300)', required=False)
+parser.add_argument('--wait',     '-w', type=int, help='Wait minutes between repeated calls (default 5min)', required=False)
 parser.add_argument('--verbose',  '-v', help='Verbose mode', action='store_true')
 args = parser.parse_args()
 
@@ -167,7 +158,7 @@ args = parser.parse_args()
 username = args.username
 password = args.password
 country  = args.country
-wait     = UPDATE_INTERVAL if args.wait == None else args.wait
+wait     = 5 if args.wait == None else args.wait
 verbose  = args.verbose
 
 # Logging config (verbose)
@@ -220,21 +211,10 @@ if client.login():
                time.sleep(1)
       except Exception as e:
          print(e)
-         syslog.syslog(syslog.LOG_ERR, "ERROR: %s" % (str(e)))
-      
-      # Calculate time until next reading
-      if recentData != None:
-         nextReading = int(recentData["lastConduitUpdateServerTime"]/1000) + wait
-         tmoSeconds  = int(nextReading - time.time())
-         #print("Next reading at {0}, {1} seconds from now\n".format(nextReading,tmoSeconds))
-         if tmoSeconds < 0:
-            tmoSeconds = RETRY_INTERVAL
-      else:
-         tmoSeconds = RETRY_INTERVAL
-         #print("Retry reading {0} seconds from now\n".format(tmoSeconds))
-
-      log.debug("Waiting " + str(tmoSeconds) + " seconds before next download!")
-      time.sleep(tmoSeconds+10)
+         syslog.syslog(syslog.LOG_ERR, e)
+            
+      log.debug("Waiting " + str(wait) + " minutes before next download!")
+      time.sleep(wait * 60)
 else:
    print("Client login error! Response code: " + str(client.getLastResponseCode()) + " Error message: " + str(client.getLastErrorMessage()))
    syslog.syslog(syslog.LOG_ERR,"Client login error! Response code: " + str(client.getLastResponseCode()) + " Error message: " + str(client.getLastErrorMessage()))
